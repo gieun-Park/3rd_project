@@ -1,0 +1,53 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets (API keys 등 — 반드시 커밋하지 말 것)
+.env
+.env.*
+!.env.example
+
+# Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Tests / tools
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE (팀에서 공유할 설정만 예외로 두려면 아래 줄 조정)
+.idea/
+
+# 로컬 문서·인덱스 (README만 추적)
+data/raw/**
+!data/raw/README.md
+data/processed/**
+!data/processed/README.md
+
+# Chroma 등 벡터 DB 기본 저장 경로
+chroma/
+
+# Test 파일
+**/test/**

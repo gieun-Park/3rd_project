@@ -1,33 +1,11 @@
-# src/generate.py
+"""Restaurant 후보 재랭킹(Retriever).
+
+DB/커넥터가 넘겨준 restaurant_list 를 질문과의 키워드 매칭 기반으로
+top-k 개로 간단히 다시 추린다. 벡터 재정렬이 붙기 전의 기본 리트리버.
+"""
 from __future__ import annotations
 
-import json
 from typing import Any
-
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
-
-from .config import SETTINGS
-
-_SESSION_MESSAGES: dict[str, list[BaseMessage]] = {}
-
-
-def load_prompt_template() -> str:
-    if not SETTINGS.prompt_path.exists():
-        raise FileNotFoundError(f"Prompt file not found: {SETTINGS.prompt_path}")
-    return SETTINGS.prompt_path.read_text(encoding="utf-8")
-
-
-def clear_session(session_id: str) -> None:
-    _SESSION_MESSAGES.pop(session_id, None)
-
-
-def get_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        model=SETTINGS.llm_model,
-        temperature=0,
-        api_key=SETTINGS.openai_api_key,
-    )
 
 
 def simple_retrieve_restaurants(
@@ -97,12 +75,10 @@ def simple_retrieve_restaurants(
 
         score = 0
 
-        # 1) query 토큰이 문서 전체 텍스트에 등장하면 가점
         for token in q_tokens:
             if token in merged:
                 score += 2
 
-        # 2) 문서 핵심 키워드가 query 원문에 부분문자열로 등장하면 큰 가점
         for kw in set(doc_keywords):
             if kw in q:
                 score += 3
@@ -113,57 +89,3 @@ def simple_retrieve_restaurants(
     top_docs = [item[1] for item in scored[:k] if item[0] > 0]
 
     return top_docs if top_docs else docs[:k]
-
-
-def generate_response(
-    question: str,
-    restaurant_list: list[dict[str, Any]],
-    route: str,
-    session_id: str = "default",
-    route_payload: dict[str, Any] | None = None,
-    connector_meta: dict[str, Any] | None = None,
-) -> str:
-    prompt_rules = load_prompt_template()
-    history = _SESSION_MESSAGES.setdefault(session_id, [])
-
-    route_payload = route_payload or {}
-    connector_meta = connector_meta or {}
-
-    retrieved_restaurants = simple_retrieve_restaurants(
-        query=question,
-        docs=restaurant_list,
-        k=SETTINGS.top_k,
-    )
-
-    system_prompt = f"""
-{prompt_rules}
-
-[Search Route]
-{route}
-
-[Search Payload]
-{json.dumps(route_payload, ensure_ascii=False, indent=2)}
-
-[Connector Meta]
-{json.dumps(connector_meta, ensure_ascii=False, indent=2)}
-""".strip()
-
-    rag_input = {
-        "question": question,
-        "restaurant_list": retrieved_restaurants,
-    }
-
-    messages: list[BaseMessage] = [
-        SystemMessage(content=system_prompt),
-        *history,
-        HumanMessage(content=json.dumps(rag_input, ensure_ascii=False, indent=2)),
-    ]
-
-    llm = get_llm()
-    result = llm.invoke(messages)
-    response = result.content if hasattr(result, "content") else str(result)
-
-    history.append(HumanMessage(content=question))
-    history.append(AIMessage(content=response))
-
-    return response

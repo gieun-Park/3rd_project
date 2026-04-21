@@ -17,7 +17,6 @@ class Settings:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
     prompt_path: Path = BASE_DIR / "prompts" / "system_prompt.txt"
-    data_path: Path = BASE_DIR / "data" / "restaurants.csv"
 
     top_k: int = int(os.getenv("TOP_K", "5"))
 

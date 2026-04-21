@@ -1,15 +1,18 @@
-# src/pipeline.py
+"""질의응답 파이프라인(LangGraph) + CLI 진입점.
+
+- `run_qa(question, connector_response, session_id)` : 외부 호출용 API
+- `python -m src.pipeline`                          : 터미널에서 대화 테스트
+"""
 from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
-from .config import SETTINGS
-from .embedding_tool import embedding_slot_extract
-from .generate import generate_response
-from .llm_tool2 import fixed_search
+from .generator import generate_response
+from .mock_data import restaurant_list as MOCK_RESTAURANT_LIST
+from .router import decide_route
+from .slot_extractor import embedding_slot_extract, fixed_search
 
 
 class GraphState(TypedDict, total=False):
@@ -18,7 +21,7 @@ class GraphState(TypedDict, total=False):
 
     # ============================================================
     # [커넥터 반환 데이터가 들어오는 자리]
-    # main.py 또는 외부 호출부에서 아래 형태로 넘겨준다고 가정
+    # pipeline.main() 또는 외부 호출부에서 아래 형태로 넘겨준다고 가정
     #
     # {
     #     "restaurant_list": [...],
@@ -36,38 +39,6 @@ class GraphState(TypedDict, total=False):
 
 
 _graph = None
-
-
-def decide_route(question: str) -> str:
-    router_prompt = """
-너는 식당 검색 라우터다.
-사용자 질문을 보고 반드시 아래 둘 중 하나만 반환해.
-
-- embedding
-- fixed
-
-판단 기준:
-1) 분위기, 상황, 취향, 특징, 평가, 조합 조건 중심이면 embedding
-2) 특정 식당명, 특정 메뉴명, 특정 유저/리뷰어, 명시적 엔티티 검색이면 fixed
-3) 지역명이 들어가더라도 핵심이 조건 기반 탐색이면 embedding
-4) 애매하면 embedding
-
-반드시 embedding 또는 fixed 중 하나의 단어만 출력해.
-
-사용자 질문:
-{question}
-""".strip()
-
-    llm = ChatOpenAI(
-        model=SETTINGS.router_model,
-        temperature=0,
-        api_key=SETTINGS.openai_api_key,
-    )
-
-    raw = llm.invoke(router_prompt.replace("{question}", question)).content.strip().lower()
-    if "fixed" in raw:
-        return "fixed"
-    return "embedding"
 
 
 def _normalize_connector_response(result: Any) -> dict[str, Any]:
@@ -110,7 +81,7 @@ def fixed_slot_node(state: GraphState) -> GraphState:
 def connector_prepare_node(state: GraphState) -> GraphState:
     # ============================================================
     # [커넥터 반환 데이터 받아오는 곳]
-    # 외부(main.py 등)에서 전달받은 connector_response를 여기서 정규화함
+    # 외부(main 등)에서 전달받은 connector_response를 여기서 정규화함
     # ============================================================
     connector_response = _normalize_connector_response(state.get("connector_response"))
 
@@ -201,7 +172,7 @@ def run_qa(
 
     # ============================================================
     # [외부에서 커넥터 반환 데이터를 주입하는 곳]
-    # main.py가 connector_response를 넘겨주면 여기서 그래프에 넣음
+    # main()이 connector_response를 넘겨주면 여기서 그래프에 넣음
     # ============================================================
     result = graph.invoke(
         {
@@ -219,3 +190,45 @@ def run_qa(
         "restaurant_list": result.get("restaurant_list", []),
         "answer": result.get("answer", ""),
     }
+
+
+def main() -> None:
+    """CLI 대화형 테스트 진입점.
+
+    빈 Enter로 종료. 커넥터 자리에는 `mock_data.restaurant_list` 를 주입.
+    """
+    print("=" * 60)
+    print("맛집 추천 CLI 테스트 (빈 Enter 입력시 종료)")
+    print("=" * 60)
+
+    while True:
+        try:
+            question = input("\n질문 > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n종료합니다.")
+            break
+
+        if not question:
+            print("종료합니다.")
+            break
+
+        connector_response = {
+            "restaurant_list": MOCK_RESTAURANT_LIST,
+            "search_mode": "embedding",
+            "candidate_count": len(MOCK_RESTAURANT_LIST),
+        }
+
+        result = run_qa(
+            question=question,
+            connector_response=connector_response,
+            session_id="default",
+        )
+
+        # print(f"\n[route]   {result.get('route')}")
+        # print(f"[payload] {result.get('route_payload')}")
+        print("\n[답변]")
+        print(result["answer"])
+
+
+if __name__ == "__main__":
+    main()

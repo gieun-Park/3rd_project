@@ -1,6 +1,11 @@
 import streamlit as st
+import streamlit.components.v1 as components
+
+import database.sql.utils as dbconnector
 
 st.set_page_config(layout="wide")
+
+KAKAO_KEY = None
 
 content_height = 500
 search_height = 100
@@ -24,6 +29,17 @@ search_result = "search_result"
 if search_result not in st.session_state:
     st.session_state[search_result] = []
 
+    #<test> 테스트용 코드
+    from test_mockup import restaurant_list as rlist
+    st.session_state[search_result] = rlist
+
+lat = "lat"
+lng = "lng"
+if lat not in st.session_state:
+    # 신대방 삼거리역 위치
+    st.session_state[lat] = 37.4997
+    st.session_state[lng] = 126.9281
+
 ######################################################################
 # 함수 선언
 ######################################################################
@@ -35,18 +51,95 @@ def open_restaurant_page(restaurant_data:dict):
 def close_restaurant_page():
     st.session_state[open_restaurant] = None
 
+def menu_card(menu_data:dict) -> str:
+    html_code = f"""<div class="menu_card">
+    <p style="margin: 0">{menu_data["name"]}</p>
+    <p style="margin: 0">{menu_data["price"]}</p>
+    <p style="margin: 0">{menu_data["description"]}</p>
+</div>"""
+    return html_code
+
+def review_card(review_data:dict) -> str:
+    html_code = f"""<div class="review_card">
+    <p style="margin: 0">{review_data["name"]}</p>
+    <p style="margin: 0">{review_data["score"]}</p>
+    <p style="margin: 0">{review_data["avg_score"]}</p>
+    <p style="margin: 0">{review_data["taste_level"]}</p>
+    <p style="margin: 0">{review_data["price_level"]}</p>
+    <p style="margin: 0">{review_data["service_level"]}</p>
+    <p style="margin: 0">{", ".join(review_data["tags"])}</p>
+    <p style="margin: 0">{review_data["content"]}</p>
+    <p style="margin: 0">{review_data["menu"]}</p>
+</div>"""
+    return html_code
+
 def restaurant_page(restaurant_data:dict):
     html_code = f"""
 <style>
+* {{
+    box-sizing: border-box;
+    padding: 0px;
+    margin: 0px;
+}}
+
+.center_aligned {{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}}
+
+.container {{
+    width: 100%;
+}}
+
+.divider {{
+    border: none;
+    border-top: 1px solid #e0e0e0;
+    margin: 12px 12px;
+}}
+
+.menu_card {{
+    margin: 5px 0px;
+    border: 1px solid black;
+    border-radius: 5px;
+}}
+
+.review_card {{
+    margin: 5px 0px;
+    border: 1px solid black;
+    border-radius: 5px;
+}}
+
 #main_container {{
     width: 430px;
-    height: 800px;
-    background-color: lightgreen;
 }}
+
 </style>
 <div id="main_container">
-레스토랑 이름: {restaurant_data["name"]}<br>
-레스토랑 내용 들어가는 곳
+    <div class="container center_aligned">
+        <img id="profile_img" src="{restaurant_data["img_link"]}"/>
+    </div>
+    <div class="container">
+        <h3>{restaurant_data["name"]}</h3>
+        <p>
+            <strong>{restaurant_data["region"]}</strong> | {restaurant_data["address"]}<br>
+            <p>⏰: {restaurant_data["open_time"]} ~ {restaurant_data["close_time"]} ☎️: {restaurant_data["tel_no"]}</p>
+            <p>{" ".join(["⭐" + c for c in restaurant_data["category"]])}</p>
+            <p>{" ".join(["#" + t for t in restaurant_data["tags"]])}</p>
+        </p>
+    </div>
+    <div class="divider"></div>
+    <div class="container">
+        {
+            "\n\t\t".join([menu_card(m) for m in restaurant_data["menus"]])
+        }
+    </div>
+    <div class="divider"></div>
+    <div class="container">
+        {
+            "\n\t\t".join([review_card(r) for r in restaurant_data["reviews"]])
+        }
+    </div>
 </div>
 """
     return html_code
@@ -72,11 +165,29 @@ def switch_button(to_chat:bool):
 # 검색창 함수
 def print_search():
     for s in st.session_state[search_result]:
+        #<test> 식당 카드 출력
         st.button(f"{s["name"]}", on_click=open_restaurant_page, args=[s,])
 
+fixed_search_options = ["식당이름", "메뉴", "유저명"]
+fixed_search_data_keys = ["restaurant", "menu", "user"]
 def add_search(intype:str, instr:str):
-    # 검색 함수
-    st.session_state[search_result].append({"name":instr})
+    close_restaurant_page()
+    
+    indict = {
+        fixed_search_data_keys[0]: "",
+        fixed_search_data_keys[1]: "",
+        fixed_search_data_keys[2]: ""
+    }
+
+    target_key = fixed_search_data_keys[fixed_search_options.index(intype)]
+
+    indict[target_key] = instr
+
+    #<test> 검색 함수
+    #st.session_state[search_result] = dbconnector.fixed_search(indict)
+
+    # 지도 갱신
+    st.rerun()
 
 # 채팅창 함수
 def print_chat():
@@ -90,26 +201,66 @@ def print_chat():
 def add_chat(instr:str):
     st.session_state[session_chat].append({"role":"user", "content":instr})
     
-    # 답변 받아오기
+    #<test> 답변 받아오기
     st.session_state[session_chat].append({"role":"assistant", "content":"AI 반응"})
 
-######################################################################
-# 식당 정보 페이지
-######################################################################
-if st.session_state[open_restaurant] is not None:
-    with left_sidebar:
-        with st.container(height=search_height + content_height + 16):
-            _, col = st.columns([8.7, 1.3])
+# 지도 함수
+def render_kakao_map(lat, lon, markers=None):
+    """카카오 지도를 렌더링하고 마커를 표시하는 함수"""
+    if not KAKAO_KEY:
+        st.markdown(
+        """
+        <div style="
+            background-color: lightblue;
+            padding: 10px;
+            border-radius: 8px;
+            width: 800px; height: 615px;">
+        🔑 .env 파일에서 KAKAO_MAP_KEY를 확인해주세요.
+        </div>""",
+        unsafe_allow_html=True)
+        return
 
-            with col:
-                st.button("✖️", on_click=close_restaurant_page)
+    if markers is None:
+        markers = []
 
-            st.markdown(restaurant_page(st.session_state[open_restaurant]), unsafe_allow_html=True)
+    marker_scripts = []
+
+    for ith_lat, ith_lon in markers:
+        marker_scripts.append(f"""
+            new kakao.maps.Marker({{
+                map: map,
+                position: new kakao.maps.LatLng({ith_lat}, {ith_lon})
+            }});
+        """)
+
+    buffer = "\n".join(marker_scripts)
+
+    html_code = f"""
+    <div id="map" style="width:800px;height:615px;border-radius:15px;box-shadow:0 4px 6px rgba(0,0,0,0.1);"></div>
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={KAKAO_KEY}&autoload=false"></script>
+    <script>
+        kakao.maps.load(function() {{
+            var container = document.getElementById('map');
+
+            // 지도 중심 세팅
+            var options = {{
+                center: new kakao.maps.LatLng({lat}, {lon}),
+                level: 3
+            }};
+
+            var map = new kakao.maps.Map(container, options);
+
+            // 마커 생성 및 표시
+            {buffer}
+        }});
+    </script>
+    """
+    components.html(html_code, height=635)
 
 ######################################################################
 # 채팅창
 ######################################################################
-elif st.session_state[open_chat]:
+if st.session_state[open_chat]:
     with left_sidebar:
         with st.container(height=search_height):
             col1, col2 = st.columns([1.5, 8.5])
@@ -138,25 +289,30 @@ else:
             with col2:
                 user_input = st.chat_input("검색어")
 
-            user_input_type = st.selectbox("검색 옵션", ["식당이름", "메뉴", "유저명"], label_visibility="collapsed")
+            user_input_type = st.selectbox("검색 옵션", fixed_search_options, label_visibility="collapsed")
 
             if user_input is not None:
                 add_search(user_input_type, user_input)
-
         with st.container(height=content_height - selectbox_height):
-            print_search()
+######################################################################
+# 식당 정보 페이지
+######################################################################
+            if st.session_state[open_restaurant] is not None:
+                                    
+                    _, col = st.columns([8.7, 1.3])
+                    with col:
+                        st.button("✖️", on_click=close_restaurant_page)
+
+                    st.markdown(restaurant_page(st.session_state[open_restaurant]), unsafe_allow_html=True)
+######################################################################
+# 검색 결과 페이지
+######################################################################
+            else:
+                print_search()
 
 ######################################################################
 # 지도
 ######################################################################
 with map_field:
-    st.markdown(
-        """
-        <div style="
-            background-color: lightblue;
-            padding: 10px;
-            border-radius: 8px;
-            width: 800px; height: 615px;">
-        지도 들어갈 자리
-        </div>""",
-        unsafe_allow_html=True)
+    sample_markers = [(37.5000, 126.9277), (37.5003, 126.9267), (37.4994, 126.9278), (37.4989, 126.9251)]
+    render_kakao_map(37.5003, 126.9267, sample_markers)
